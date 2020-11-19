@@ -114,7 +114,7 @@ static dispatch_queue_t YBIBImageProcessingQueue(void) {
     self.loadingStatus = YBIBImageLoadingStatusCompressing;
     __weak typeof(self) wSelf = self;
     CGSize size = [self bestSizeOfCompressing];
-
+    
     YBIB_DISPATCH_ASYNC(YBIBImageProcessingQueue(), ^{
         if (self->_freezing) {
             self.loadingStatus = YBIBImageLoadingStatusNone;
@@ -596,12 +596,28 @@ static dispatch_queue_t YBIBImageProcessingQueue(void) {
 
 - (void)yb_saveToPhotoAlbum {
     void(^saveData)(NSData *) = ^(NSData * _Nonnull data){
-        [[ALAssetsLibrary new] writeImageDataToSavedPhotosAlbum:data metadata:nil completionBlock:^(NSURL *assetURL, NSError *error) {
-            [self saveToPhotoAlbumCompleteWithError:error];
+        NSString *documentsDirectory  =  [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+        NSString *dataPath = [documentsDirectory stringByAppendingPathComponent:@"temp.gif"];
+        [data writeToFile:dataPath atomically:NO];
+        [[PHPhotoLibrary sharedPhotoLibrary]performChanges:^{
+            [PHAssetChangeRequest creationRequestForAssetFromImageAtFileURL:[NSURL fileURLWithPath:dataPath]];
+        } completionHandler:^(BOOL success, NSError * _Nullable error) {
+            if (!error) {
+              [[NSFileManager defaultManager] removeItemAtPath:dataPath error:nil];
+            }
+            [[NSOperationQueue mainQueue] addOperationWithBlock:^{
+                [self saveToPhotoAlbumCompleteWithError:error];
+            }];
         }];
     };
     void(^saveImage)(UIImage *) = ^(UIImage * _Nonnull image){
-        UIImageWriteToSavedPhotosAlbum(image, self, @selector(UIImageWriteToSavedPhotosAlbum_completedWithImage:error:context:), NULL);
+        [[PHPhotoLibrary sharedPhotoLibrary]performChanges:^{
+            [PHAssetChangeRequest creationRequestForAssetFromImage:image];
+        } completionHandler:^(BOOL success, NSError * _Nullable error) {
+            [[NSOperationQueue mainQueue] addOperationWithBlock:^{
+                [self saveToPhotoAlbumCompleteWithError:error];
+            }];
+        }];
     };
     void(^unableToSave)(void) = ^(){
         [self.yb_auxiliaryViewHandler() yb_showIncorrectToastWithContainer:self.yb_containerView text:[YBIBCopywriter sharedCopywriter].unableToSave];
